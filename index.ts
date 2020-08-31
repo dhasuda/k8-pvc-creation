@@ -10,8 +10,7 @@ app.use(bodyParser.urlencoded({ extended: false }))
 
 app.post('/', (req, res) => {
     const pvcName = req.get(Constants.PVC_NAME_KEY)
-    const repoFullName = req.get(Constants.REPO_FULL_NAME_KEY)
-    if (!pvcName || !repoFullName) {
+    if (!pvcName) {
         res.statusCode = Constants.BAD_REQUEST_CODE
         res.end()
         return
@@ -22,9 +21,22 @@ app.post('/', (req, res) => {
     req.on('data', t => buf.push(t))
     req.on('end', async () => {
         const body = JSON.parse(Buffer.concat(buf).toString())
-        const fullClaimName = `${pvcName}-${repoFullName}`
+        const repoName = body.repository?.name
+        const ownerName = body.repository?.owner?.login
+        if (!repoName || !ownerName) {
+            res.statusCode = Constants.BAD_REQUEST_CODE
+            res.end()
+            return
+        }
+        const fullClaimName = `${pvcName}-${ownerName}-${repoName}`
         try {
-            await createPersistentVolumeClaim(fullClaimName, namespace)
+            try {
+                await createPersistentVolumeClaim(fullClaimName, namespace)
+            } catch (e) {
+                if (e.statusCode !== 409) {
+                    throw e
+                }
+            }
             const result = {
                 ...body,
                 [pvcName]: fullClaimName
@@ -35,6 +47,7 @@ app.post('/', (req, res) => {
             }
             res.end(JSON.stringify(result))
         } catch (err) {
+            console.log('GENERIC ERROR: 500', inspect(err))
             res.statusCode = 500
             res.end(inspect(err))
         }
