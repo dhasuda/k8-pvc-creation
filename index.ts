@@ -1,38 +1,37 @@
 import { inspect } from 'util'
-import { randomBytes } from 'crypto'
 
 import express from 'express'
 import k8s from '@kubernetes/client-node'
 import bodyParser from 'body-parser'
-
-const PORT = 8080
-const PVC_NAME_KEY = 'X-Pvc-Name'
+import { Constants } from './constants'
 
 const app = express()
 app.use(bodyParser.urlencoded({ extended: false }))
 
 app.post('/', (req, res) => {
-    const pvcName = req.get(PVC_NAME_KEY)
-    if (pvcName === undefined) {
-        res.statusCode = 400
+    const pvcName = req.get(Constants.PVC_NAME_KEY)
+    const repoFullName = req.get(Constants.REPO_FULL_NAME_KEY)
+    if (!pvcName || !repoFullName) {
+        res.statusCode = Constants.BAD_REQUEST_CODE
         res.end()
         return
     }
+    const namespace = req.get(Constants.NAMESPACE_KEY) || 'default'
+
     const buf: Buffer[] = []
     req.on('data', t => buf.push(t))
     req.on('end', async () => {
         const body = JSON.parse(Buffer.concat(buf).toString())
-        const secretName = `${pvcName!}-${randomBytes(8).toString('hex')}`.toLowerCase()
+        const fullClaimName = `${pvcName}-${repoFullName}`
         try {
+            await createPersistentVolumeClaim(fullClaimName, namespace)
             const result = {
                 ...body,
-                [pvcName]: secretName
+                [pvcName]: fullClaimName
             }
             res.statusCode = 200
-            console.log(JSON.stringify(result))
             for (const key in req.headers) {
                 res.set(key, req.get(key))
-                console.log('-H', key, req.get(key))
             }
             res.end(JSON.stringify(result))
         } catch (err) {
@@ -45,7 +44,7 @@ app.post('/', (req, res) => {
 app.delete('/', async (req, res) => {
     res.statusCode = 200
     try {
-        await k8sApi.deleteNamespacedSecret(req.body.secret, req.body.namespace || 'default')
+        k8sApi.deleteNamespacedPersistentVolumeClaim(req.body.name, req.body.namespace || 'default')
         res.statusCode = 200
         res.end()
     } catch (err) {
@@ -54,22 +53,32 @@ app.delete('/', async (req, res) => {
     }
 })
 
-app.listen(PORT)
+app.listen(Constants.PORT)
 
 const kc = new k8s.KubeConfig()
 kc.loadFromCluster()
 
 const k8sApi = kc.makeApiClient(k8s.CoreV1Api)
 
-function createSecret(name: string, namespace: string, key: string, value: string) {
-    return k8sApi.createNamespacedSecret(namespace, {
-        kind: 'Secret',
-        apiVersion: 'v1',
-        metadata: {
-            name,
-        },
-        stringData: {
-            [key]: value
+const createPersistentVolumeClaim = async (name: string, namespace: string) => {
+    return k8sApi.createNamespacedPersistentVolumeClaim(namespace,
+        {
+            apiVersion: 'v1',
+            kind: 'PersistentVolumeClaim',
+            metadata: {
+                name,
+                namespace,
+            },
+            spec: {
+                volumeMode: 'Filesystem',
+                storageClassName: 'ssd-retained',
+                resources: {
+                    requests: {
+                        storage: '50Gi',
+                    },
+                },
+                accessModes: ['ReadWriteOnce'],
+            }
         }
-    })
+    )
 }

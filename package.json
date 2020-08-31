@@ -1,5 +1,5 @@
 {
-  "name": "secret-param",
+  "name": "k8-pvc-creation",
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {
