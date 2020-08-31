@@ -1,7 +1,7 @@
 import { inspect } from 'util'
 
 import express from 'express'
-import k8s from '@kubernetes/client-node'
+import { CoreV1Api, KubeConfig } from '@kubernetes/client-node'
 import bodyParser from 'body-parser'
 import { Constants } from './constants'
 
@@ -55,10 +55,10 @@ app.delete('/', async (req, res) => {
 
 app.listen(Constants.PORT)
 
-const kc = new k8s.KubeConfig()
+const kc = new KubeConfig()
 kc.loadFromCluster()
 
-const k8sApi = kc.makeApiClient(k8s.CoreV1Api)
+const k8sApi = kc.makeApiClient(CoreV1Api)
 
 const createPersistentVolumeClaim = async (name: string, namespace: string) => {
     return k8sApi.createNamespacedPersistentVolumeClaim(namespace,
